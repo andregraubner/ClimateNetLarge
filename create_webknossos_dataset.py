@@ -81,7 +81,7 @@ def create_webknossos_dataset(samples, output_path) -> None:
             dtype_per_layer=samples.get('u').dtype,
         )
         match variable_name:
-            case 'u':
+            case 'u' | 'v' | 'tcwv' | 'msl': # TODO: If we don't distinguish between variables, we can drop the match statement
                 ch.add_mag(1, compress=True).write(samples.get('u'))
                 ch.default_view_configuration = LayerViewConfiguration(
                     color=(17, 212, 17), intensity_range=(0, 16000)
