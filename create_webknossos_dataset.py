@@ -71,6 +71,7 @@ def create_webknossos_dataset(samples, output_path) -> None:
         shutil.rmtree(output_path)
     ds = wk.Dataset(dataset_path=output_path, voxel_size=(1, 1, 1))  # TODO: what voxel size?
     ds.default_view_configuration = DatasetViewConfiguration(zoom=0.35) # TODO: zoom
+    # TODO: save xarrary
     
 
     for variable_name in samples.keys():
