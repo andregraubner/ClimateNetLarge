@@ -10,9 +10,12 @@ from webknossos.dataset.properties import (
     DatasetViewConfiguration,
     LayerViewConfiguration,
 )
+from webknossos import webknossos_context
 from pathlib import Path
 import numpy as np
 import xarray as xr
+
+webknossos_token = "hAswxSKPyjrxSKyrYIqGFw" # TODO: don't save this in code
 
 # Downloads samples from the ERA5 dataset for a timestamp
 # Retrieves data on specific pressure levels, then retrieves data on single levels, then combines them
@@ -69,8 +72,9 @@ def create_webknossos_dataset(samples, output_path) -> None:
 
     if os.path.exists(output_path):
         shutil.rmtree(output_path)
-    ds = wk.Dataset(dataset_path=output_path, voxel_size=(1, 1, 1))  # TODO: what voxel size?
-    ds.default_view_configuration = DatasetViewConfiguration(zoom=0.35) # TODO: zoom
+    ds = wk.Dataset(name="test_ar_tc",
+                    dataset_path=output_path, voxel_size=(1, 1, 1))  # TODO: what voxel size?
+    ds.default_view_configuration = DatasetViewConfiguration(zoom=0.1, rotation=(0, 1, 1))
     # TODO: save xarrary
     
 
@@ -83,12 +87,15 @@ def create_webknossos_dataset(samples, output_path) -> None:
         )
         match variable_name:
             case 'u' | 'v' | 'tcwv' | 'msl': # TODO: If we don't distinguish between variables, we can drop the match statement
-                ch.add_mag(1, compress=True).write(samples.get('u'))
+                ch.add_mag(1, compress=True).write(samples.get(variable_name))
                 ch.default_view_configuration = LayerViewConfiguration(
                     color=(17, 212, 17), intensity_range=(0, 16000)
                 )
             case _:
                 raise NotImplementedError(f"Variable type {variable_name} specified but not implemented")
+
+    with webknossos_context(token=webknossos_token):
+        ds.upload()
 
 
 # creates a chunk of ERA5 data in webKnossos format 
@@ -126,3 +133,4 @@ create_chunk(
     end_date = datetime.datetime(year=2004, month=1, day=3, hour=0),
     hours_between_samples = 12,
 )
+
