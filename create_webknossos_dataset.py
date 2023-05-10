@@ -72,9 +72,9 @@ def create_webknossos_dataset(samples, output_path) -> None:
 
     if os.path.exists(output_path):
         shutil.rmtree(output_path)
-    ds = wk.Dataset(name="test_ar_tc",
+    ds = wk.Dataset(name="test_ar_tc_05",
                     dataset_path=output_path, voxel_size=(1, 1, 1))  # TODO: what voxel size?
-    ds.default_view_configuration = DatasetViewConfiguration(zoom=0.1, rotation=(0, 1, 1))
+    ds.default_view_configuration = DatasetViewConfiguration(zoom=1, rotation=(0, 1, 1))
     # TODO: save xarrary
     
 
@@ -85,11 +85,11 @@ def create_webknossos_dataset(samples, output_path) -> None:
             COLOR_CATEGORY,
             dtype_per_layer=samples.get('u').dtype,
         )
+        ch.add_mag(1, compress=True).write(samples.get(variable_name).values)
         match variable_name:
-            case 'u' | 'v' | 'tcwv' | 'msl': # TODO: If we don't distinguish between variables, we can drop the match statement
-                ch.add_mag(1, compress=True).write(samples.get(variable_name))
+            case 'u' | 'v' | 'tcwv' | 'msl':
                 ch.default_view_configuration = LayerViewConfiguration(
-                    color=(17, 212, 17), intensity_range=(0, 16000)
+                    color=(17, 212, 17), intensity_range=(0, 16000) # TODO: configure color and intensity range per variable
                 )
             case _:
                 raise NotImplementedError(f"Variable type {variable_name} specified but not implemented")
@@ -130,7 +130,7 @@ def create_chunk(start_date : datetime.datetime, end_date : datetime, hours_betw
 # TODO: remove this test function
 create_chunk(
     start_date = datetime.datetime(year=2004, month=1, day=1, hour=0),
-    end_date = datetime.datetime(year=2004, month=1, day=3, hour=0),
+    end_date = datetime.datetime(year=2004, month=1, day=10, hour=0),
     hours_between_samples = 12,
 )
 
