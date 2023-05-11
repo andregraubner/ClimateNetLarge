@@ -73,7 +73,7 @@ def create_webknossos_dataset(samples, output_path) -> None:
     if os.path.exists(output_path):
         shutil.rmtree(output_path)
     ds = wk.Dataset(name="test_ar_tc_05",
-                    dataset_path=output_path, voxel_size=(1, 1, 1))  # TODO: what voxel size?
+                    dataset_path=output_path, voxel_size=(1e6, 1e6, 1e6))  # TODO: what voxel size?
     ds.default_view_configuration = DatasetViewConfiguration(zoom=1, rotation=(0, 1, 1))
     # TODO: save xarrary
     
@@ -87,10 +87,14 @@ def create_webknossos_dataset(samples, output_path) -> None:
         )
         ch.add_mag(1, compress=True).write(samples.get(variable_name).values)
         match variable_name:
-            case 'u' | 'v' | 'tcwv' | 'msl':
-                ch.default_view_configuration = LayerViewConfiguration(
-                    color=(17, 212, 17), intensity_range=(0, 16000) # TODO: configure color and intensity range per variable
-                )
+            case 'msl': # mean sea level pressure
+                ch.default_view_configuration = LayerViewConfiguration(color=(248, 228, 92), intensity_range=(1e5, 1.1e5), is_inverted=False, is_disabled=True)
+            case 'tcwv': # total column water vapour
+                ch.default_view_configuration = LayerViewConfiguration(color=(17, 212, 17), intensity_range=(0, 16000))
+            case 'u':
+                ch.default_view_configuration = LayerViewConfiguration(color=(153, 193, 241), intensity_range=(0, 16000), is_disabled=True)
+            case 'v':
+                ch.default_view_configuration = LayerViewConfiguration(color=(220, 138, 221), intensity_range=(0, 16000), is_disabled=True)
             case _:
                 raise NotImplementedError(f"Variable type {variable_name} specified but not implemented")
 
@@ -130,7 +134,7 @@ def create_chunk(start_date : datetime.datetime, end_date : datetime, hours_betw
 # TODO: remove this test function
 create_chunk(
     start_date = datetime.datetime(year=2004, month=1, day=1, hour=0),
-    end_date = datetime.datetime(year=2004, month=1, day=10, hour=0),
+    end_date = datetime.datetime(year=2004, month=1, day=2, hour=0),
     hours_between_samples = 12,
 )
 
