@@ -72,11 +72,9 @@ def create_webknossos_dataset(samples, output_path) -> None:
 
     if os.path.exists(output_path):
         shutil.rmtree(output_path)
-    ds = wk.Dataset(name="test_ar_tc_08", # TODO: define the name somewhere else
+    ds = wk.Dataset(name="test_ar_tc_09", # TODO: define the name somewhere else
                     dataset_path=output_path, voxel_size=(26e12, 26e12, 26e12)) 
     ds.default_view_configuration = DatasetViewConfiguration(zoom=1, rotation=(0, 1, 1))
-    # TODO: save xarrary
-    
 
     for variable_name in samples.keys():
         # switch on variable name
@@ -123,6 +121,7 @@ def create_chunk(dates, chunk_name) -> None:
         samples,
         output_path=f"data/chunks/{chunk_name}.wkw"
     )
+    samples.to_netcdf(f"data/chunks/{chunk_name}.nc")
 
 def create_chunk_for_time_interval(start_date : datetime.datetime, end_date : datetime, hours_between_samples : int) -> None:
     if start_date > end_date:
@@ -133,8 +132,8 @@ def create_chunk_for_time_interval(start_date : datetime.datetime, end_date : da
         raise ValueError("hours_between_samples must be greater than 0")
 
     dates = pandas.date_range(start_date, end_date, freq=datetime.timedelta(hours=hours_between_samples))
-    chunk_name=f"data/chunks/chunk_interval_{start_date.year}_{start_date.month}_{start_date.day}_{start_date.strftime('%H:%M')}-" + \
-        f"{end_date.year}_{end_date.month}_{end_date.day}_{end_date.strftime('%H:%M')}_delta_{hours_between_samples}h.wkw"
+    chunk_name=f"chunk_interval_{start_date.year}_{start_date.month}_{start_date.day}_{start_date.strftime('%H:%M')}-" + \
+        f"{end_date.year}_{end_date.month}_{end_date.day}_{end_date.strftime('%H:%M')}_delta_{hours_between_samples}h"
 
     create_chunk(dates, chunk_name)
 
@@ -147,8 +146,8 @@ def create_chunk_with_random_samples(start_date : datetime.datetime, end_date : 
         raise ValueError("number_of_samples must be greater than 0")
 
     dates = pandas.date_range(start_date, end_date, freq="H").to_series().sample(number_of_samples).dt.to_period("H").tolist()
-    chunk_name=f"data/chunks/chunk_random_{start_date.year}_{start_date.month}_{start_date.day}_{start_date.strftime('%H:%M')}-" + \
-        f"{end_date.year}_{end_date.month}_{end_date.day}_{end_date.strftime('%H:%M')}_samples_{number_of_samples}.wkw"
+    chunk_name=f"chunk_random_{start_date.year}_{start_date.month}_{start_date.day}_{start_date.strftime('%H:%M')}-" + \
+        f"{end_date.year}_{end_date.month}_{end_date.day}_{end_date.strftime('%H:%M')}_samples_{number_of_samples}"
 
     create_chunk(dates, chunk_name)
 
@@ -162,5 +161,5 @@ create_chunk_for_time_interval(
 """
 
 # TODO: remove this test function
-create_chunk_with_random_samples(datetime.datetime(year=1980, month=1, day=1, hour=0), datetime.datetime(year=2023, month=1, day=1, hour=0), 5)
+create_chunk_with_random_samples(datetime.datetime(year=1980, month=1, day=1, hour=0), datetime.datetime(year=2023, month=1, day=1, hour=0), 3)
 
