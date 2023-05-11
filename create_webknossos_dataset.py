@@ -26,11 +26,10 @@ def download_samples(dates : list[datetime.datetime], pressure_level_variables :
     c = cdsapi.Client()
     Path("data/temp").mkdir(parents=True, exist_ok=True)
     
-    for date in dates: # TODO: we might want to parallelize this
+    for i, date in enumerate(dates): # TODO: we might want to parallelize this
         pressure_level_path = f"data/temp/pressure_level_{date.year}_{date.month}_{date.day}_{date.strftime('%H:%M')}:00.nc"
         single_level_path = f"data/temp/single_level_{date.year}_{date.month}_{date.day}_{date.strftime('%H:%M')}:00.nc"
-        print(f"date: {date}")
-        print(f"hour: {date.strftime('%H:%M')}")
+        print(f"sample {i+1}/{len(dates)} |  date: {date} hour: {date.strftime('%H:%M')}")
         c.retrieve(
             'reanalysis-era5-pressure-levels',
             {
@@ -58,11 +57,12 @@ def download_samples(dates : list[datetime.datetime], pressure_level_variables :
             },
             single_level_path
         )
+        print()
 
         pressure_level_data = xr.open_dataset(pressure_level_path)
         single_level_data = xr.open_dataset(single_level_path)
-        os.remove(pressure_level_path) # remove temp files
-        os.remove(single_level_path)
+        # os.remove(pressure_level_path) # remove temp files
+        # os.remove(single_level_path)
 
         samples += [xr.merge([pressure_level_data, single_level_data])]
 
@@ -72,7 +72,7 @@ def create_webknossos_dataset(samples, output_path) -> None:
 
     if os.path.exists(output_path):
         shutil.rmtree(output_path)
-    ds = wk.Dataset(name="test_ar_tc_09", # TODO: define the name somewhere else
+    ds = wk.Dataset(name="AR_TC_random_100", # TODO: define the name somewhere else
                     dataset_path=output_path, voxel_size=(26e12, 26e12, 26e12)) 
     ds.default_view_configuration = DatasetViewConfiguration(zoom=1, rotation=(0, 1, 1))
 
@@ -161,5 +161,5 @@ create_chunk_for_time_interval(
 """
 
 # TODO: remove this test function
-create_chunk_with_random_samples(datetime.datetime(year=1980, month=1, day=1, hour=0), datetime.datetime(year=2023, month=1, day=1, hour=0), 3)
+create_chunk_with_random_samples(datetime.datetime(year=1980, month=1, day=1, hour=0), datetime.datetime(year=2023, month=1, day=1, hour=0), 100)
 
