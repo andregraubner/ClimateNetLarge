@@ -72,8 +72,8 @@ def create_webknossos_dataset(samples, output_path) -> None:
 
     if os.path.exists(output_path):
         shutil.rmtree(output_path)
-    ds = wk.Dataset(name="test_ar_tc_05",
-                    dataset_path=output_path, voxel_size=(1e6, 1e6, 1e6))  # TODO: what voxel size?
+    ds = wk.Dataset(name="test_ar_tc_08", # TODO: define the name somewhere else
+                    dataset_path=output_path, voxel_size=(26e12, 26e12, 26e12)) 
     ds.default_view_configuration = DatasetViewConfiguration(zoom=1, rotation=(0, 1, 1))
     # TODO: save xarrary
     
@@ -87,10 +87,10 @@ def create_webknossos_dataset(samples, output_path) -> None:
         )
         ch.add_mag(1, compress=True).write(samples.get(variable_name).values)
         match variable_name:
-            case 'msl': # mean sea level pressure
-                ch.default_view_configuration = LayerViewConfiguration(color=(248, 228, 92), intensity_range=(1e5, 1.1e5), is_inverted=False, is_disabled=True)
             case 'tcwv': # total column water vapour
                 ch.default_view_configuration = LayerViewConfiguration(color=(17, 212, 17), intensity_range=(0, 16000))
+            case 'msl': # mean sea level pressure
+                ch.default_view_configuration = LayerViewConfiguration(color=(248, 228, 92), intensity_range=(1e5, 1.1e5), min=5e4, is_inverted=False, is_disabled=True)
             case 'u':
                 ch.default_view_configuration = LayerViewConfiguration(color=(153, 193, 241), intensity_range=(0, 16000), is_disabled=True)
             case 'v':
@@ -103,18 +103,12 @@ def create_webknossos_dataset(samples, output_path) -> None:
 
 
 # creates a chunk of ERA5 data in webKnossos format 
-# the chunk includes all samples between start_date and end_date (exclusively)
+# the chunk includes all samples between start_date and end_date (inclusively)
 # the samples are spaced by delta_between_samples
 # samples are only possible at full hours
-def create_chunk(start_date : datetime.datetime, end_date : datetime, hours_between_samples : int) -> None:
-    if start_date > end_date:
-        raise ValueError("start_date must be before end_date")
-    if start_date.minute != 0 or start_date.second != 0 or start_date.microsecond != 0:
-        raise ValueError("start_date must be at the beginning of an hour")
-    if hours_between_samples <= 0:
-        raise ValueError("hours_between_samples must be greater than 0")
+def create_chunk(dates, chunk_name) -> None:
+    print(f"Creating chunk {chunk_name}")
 
-    dates = pandas.date_range(start_date, end_date, freq=datetime.timedelta(hours=hours_between_samples))
     pressure_level_variables = [
         'u_component_of_wind', # TODO: don't define this here
         'v_component_of_wind',
@@ -127,14 +121,46 @@ def create_chunk(start_date : datetime.datetime, end_date : datetime, hours_betw
     samples = download_samples(dates, pressure_level_variables, pressure_level, single_level_variables)
     create_webknossos_dataset(
         samples,
-        output_path=f"data/chunks/chunk_{start_date.year}_{start_date.month}_{start_date.day}_{start_date.strftime('%H:%M')}-" + \
-            f"{end_date.year}_{end_date.month}_{end_date.day}_{end_date.strftime('%H:%M')}_delta_{hours_between_samples}h.wkw"
+        output_path=f"data/chunks/{chunk_name}.wkw"
     )
 
+def create_chunk_for_time_interval(start_date : datetime.datetime, end_date : datetime, hours_between_samples : int) -> None:
+    if start_date > end_date:
+        raise ValueError("start_date must be before end_date")
+    if start_date.minute != 0 or start_date.second != 0 or start_date.microsecond != 0:
+        raise ValueError("start_date must be at the beginning of an hour")
+    if hours_between_samples <= 0:
+        raise ValueError("hours_between_samples must be greater than 0")
+
+    dates = pandas.date_range(start_date, end_date, freq=datetime.timedelta(hours=hours_between_samples))
+    chunk_name=f"data/chunks/chunk_interval_{start_date.year}_{start_date.month}_{start_date.day}_{start_date.strftime('%H:%M')}-" + \
+        f"{end_date.year}_{end_date.month}_{end_date.day}_{end_date.strftime('%H:%M')}_delta_{hours_between_samples}h.wkw"
+
+    create_chunk(dates, chunk_name)
+
+def create_chunk_with_random_samples(start_date : datetime.datetime, end_date : datetime, number_of_samples : int) -> None:
+    if start_date > end_date:
+        raise ValueError("start_date must be before end_date")
+    if start_date.minute != 0 or start_date.second != 0 or start_date.microsecond != 0:
+        raise ValueError("start_date must be at the beginning of an hour")
+    if number_of_samples <= 0:
+        raise ValueError("number_of_samples must be greater than 0")
+
+    dates = pandas.date_range(start_date, end_date, freq="H").to_series().sample(number_of_samples).dt.to_period("H").tolist()
+    chunk_name=f"data/chunks/chunk_random_{start_date.year}_{start_date.month}_{start_date.day}_{start_date.strftime('%H:%M')}-" + \
+        f"{end_date.year}_{end_date.month}_{end_date.day}_{end_date.strftime('%H:%M')}_samples_{number_of_samples}.wkw"
+
+    create_chunk(dates, chunk_name)
+
 # TODO: remove this test function
-create_chunk(
+"""
+create_chunk_for_time_interval(
     start_date = datetime.datetime(year=2004, month=1, day=1, hour=0),
-    end_date = datetime.datetime(year=2004, month=1, day=2, hour=0),
+    end_date = datetime.datetime(year=2004, month=1, day=1, hour=0), # inclusively
     hours_between_samples = 12,
 )
+"""
+
+# TODO: remove this test function
+create_chunk_with_random_samples(datetime.datetime(year=1980, month=1, day=1, hour=0), datetime.datetime(year=2023, month=1, day=1, hour=0), 5)
 
