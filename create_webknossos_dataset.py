@@ -27,9 +27,10 @@ def download_samples(dates : list[datetime.datetime], pressure_level_variables :
     Path("data/temp").mkdir(parents=True, exist_ok=True)
     
     for i, date in enumerate(dates): # TODO: we might want to parallelize this
-        pressure_level_path = f"data/temp/pressure_level_{date.year}_{date.month}_{date.day}_{date.strftime('%H:%M')}:00.nc"
+        # pressure_level_path = f"data/temp/pressure_level_{date.year}_{date.month}_{date.day}_{date.strftime('%H:%M')}:00.nc"
         single_level_path = f"data/temp/single_level_{date.year}_{date.month}_{date.day}_{date.strftime('%H:%M')}:00.nc"
         print(f"sample {i+1}/{len(dates)} |  date: {date} hour: {date.strftime('%H:%M')}")
+        """
         c.retrieve(
             'reanalysis-era5-pressure-levels',
             {
@@ -44,6 +45,7 @@ def download_samples(dates : list[datetime.datetime], pressure_level_variables :
             },
             pressure_level_path,
         )
+        """
         c.retrieve(
             'reanalysis-era5-single-levels',
             {
@@ -59,40 +61,43 @@ def download_samples(dates : list[datetime.datetime], pressure_level_variables :
         )
         print()
 
-        pressure_level_data = xr.open_dataset(pressure_level_path)
+        # pressure_level_data = xr.open_dataset(pressure_level_path)
         single_level_data = xr.open_dataset(single_level_path)
         # os.remove(pressure_level_path) # remove temp files
         # os.remove(single_level_path)
 
-        samples += [xr.merge([pressure_level_data, single_level_data])]
+        # samples += [xr.merge([pressure_level_data, single_level_data])]
+        samples += [single_level_data]
 
     return xr.concat(samples, dim="time")
 
-def create_webknossos_dataset(samples, output_path) -> None:
+def create_webknossos_dataset(samples : xr.Dataset, output_variables : list[str], output_path : str) -> None:
 
     if os.path.exists(output_path):
         shutil.rmtree(output_path)
-    ds = wk.Dataset(name="AR_TC_random_100", # TODO: define the name somewhere else
+    ds = wk.Dataset(name="AR_TC_random_4", # TODO: define the name somewhere else
                     dataset_path=output_path, voxel_size=(26e12, 26e12, 26e12)) 
     ds.default_view_configuration = DatasetViewConfiguration(zoom=1, rotation=(0, 1, 1))
 
-    for variable_name in samples.keys():
+    for variable_name in output_variables:
         # switch on variable name
         ch = ds.add_layer(
             variable_name,
             COLOR_CATEGORY,
-            dtype_per_layer=samples.get('u').dtype,
+            np.float32, # TODO: could use np.uint8 (with scaling) to save space
+            # dtype_per_layer=samples.get(variable_name).dtype,
         )
-        ch.add_mag(1, compress=True).write(samples.get(variable_name).values)
         match variable_name:
-            case 'tcwv': # total column water vapour
+            case 'total column water vapour (TCWV)': # total column water vapour
+                ch.add_mag(1, compress=True).write(samples.get('tcwv').values)
                 ch.default_view_configuration = LayerViewConfiguration(color=(17, 212, 17), intensity_range=(0, 16000))
-            case 'msl': # mean sea level pressure
-                ch.default_view_configuration = LayerViewConfiguration(color=(248, 228, 92), intensity_range=(1e5, 1.1e5), min=5e4, is_inverted=False, is_disabled=True)
-            case 'u':
-                ch.default_view_configuration = LayerViewConfiguration(color=(153, 193, 241), intensity_range=(0, 16000), is_disabled=True)
-            case 'v':
-                ch.default_view_configuration = LayerViewConfiguration(color=(220, 138, 221), intensity_range=(0, 16000), is_disabled=True)
+            case 'mean pressure at sea level (MSL)': # mean sea level pressure
+                ch.add_mag(1, compress=True).write(samples.get('msl').values)
+                ch.default_view_configuration = LayerViewConfiguration(color=(248, 228, 92), intensity_range=(1e5, 1.1e5), min=9.5e4, is_inverted=False, is_disabled=True)
+            case 'integrated vapour transport (IVT)':
+                ivt = np.sqrt(samples.get('p72.162')**2 + samples.get('p71.162')**2)
+                ch.add_mag(1, compress=True).write(ivt)
+                ch.default_view_configuration = LayerViewConfiguration(color=(153, 193, 241), intensity_range=(0, 1000), is_disabled=True)
             case _:
                 raise NotImplementedError(f"Variable type {variable_name} specified but not implemented")
 
@@ -104,21 +109,29 @@ def create_webknossos_dataset(samples, output_path) -> None:
 # the chunk includes all samples between start_date and end_date (inclusively)
 # the samples are spaced by delta_between_samples
 # samples are only possible at full hours
-def create_chunk(dates, chunk_name) -> None:
+def create_chunk(dates : list[pandas.Period], chunk_name : str) -> None:
     print(f"Creating chunk {chunk_name}")
 
     pressure_level_variables = [
-        'u_component_of_wind', # TODO: don't define this here
-        'v_component_of_wind',
+        # 'u_component_of_wind', # TODO: don't define this here
+        # 'v_component_of_wind',
     ]
     pressure_level = 850 # TODO: don't define this here
     single_level_variables = [
         'mean_sea_level_pressure', # TODO: don't define this here
-        'total_column_water_vapour', # TODO: is this the right variable?
+        'total_column_water_vapour',
+        'vertical_integral_of_northward_water_vapour_flux',
+        'vertical_integral_of_eastward_water_vapour_flux',
+    ]
+    output_variables = [
+        'mean pressure at sea level (MSL)',
+        'total column water vapour (TCWV)',
+        'integrated vapour transport (IVT)'
     ]
     samples = download_samples(dates, pressure_level_variables, pressure_level, single_level_variables)
     create_webknossos_dataset(
         samples,
+        output_variables,
         output_path=f"data/chunks/{chunk_name}.wkw"
     )
     samples.to_netcdf(f"data/chunks/{chunk_name}.nc")
@@ -161,5 +174,5 @@ create_chunk_for_time_interval(
 """
 
 # TODO: remove this test function
-create_chunk_with_random_samples(datetime.datetime(year=1980, month=1, day=1, hour=0), datetime.datetime(year=2023, month=1, day=1, hour=0), 100)
+create_chunk_with_random_samples(datetime.datetime(year=1980, month=1, day=1, hour=0), datetime.datetime(year=2023, month=1, day=1, hour=0), 3)
 
