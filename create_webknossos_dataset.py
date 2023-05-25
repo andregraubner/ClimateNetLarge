@@ -1,7 +1,9 @@
 import os
 import shutil
 from tqdm import tqdm
+from multiprocessing import Pool
 import datetime
+from itertools import repeat
 import pandas 
 import cdsapi
 import webknossos as wk
@@ -17,56 +19,38 @@ import xarray as xr
 
 webknossos_token = "hAswxSKPyjrxSKyrYIqGFw" # TODO: don't save this in code
 
+def download_sample(date : datetime.datetime, single_level_variables : list[str]) -> None:
+    single_level_path = f"data/temp/single_level_{date.year}_{date.month}_{date.day}_{date.strftime('%H:%M')}:00.nc"
+    c = cdsapi.Client()
+    c.retrieve(
+        'reanalysis-era5-single-levels',
+        {
+            'product_type': 'reanalysis',
+            'format': 'netcdf',
+            'variable': single_level_variables,
+            'year': date.year,
+            'month': date.month,
+            'day': date.day,
+            'time': date.strftime("%H:%M"),
+        },
+        single_level_path
+    )
+
 # Downloads samples from the ERA5 dataset for a timestamp
 # Retrieves data on specific pressure levels, then retrieves data on single levels, then combines them
 # Returns the combined data
+# TODO: remove unused parameters
 def download_samples(dates : list[datetime.datetime], pressure_level_variables : list[str], pressure_level : int, single_level_variables : list[str]) -> None:
     samples = []
 
-    c = cdsapi.Client()
     Path("data/temp").mkdir(parents=True, exist_ok=True)
+
+    with Pool(100) as pool:
+        pool.starmap(download_sample, tqdm(zip(dates, repeat(single_level_variables)), total=len(dates)))
     
-    for i, date in enumerate(dates): # TODO: we might want to parallelize this
-        # pressure_level_path = f"data/temp/pressure_level_{date.year}_{date.month}_{date.day}_{date.strftime('%H:%M')}:00.nc"
+    for date in tqdm(dates):
         single_level_path = f"data/temp/single_level_{date.year}_{date.month}_{date.day}_{date.strftime('%H:%M')}:00.nc"
-        print(f"sample {i+1}/{len(dates)} |  date: {date} hour: {date.strftime('%H:%M')}")
-        """
-        c.retrieve(
-            'reanalysis-era5-pressure-levels',
-            {
-                'product_type': 'reanalysis',
-                'format': 'netcdf',
-                'variable': pressure_level_variables, 
-                'pressure_level': pressure_level,
-                'year': date.year,
-                'month': date.month,
-                'day': date.day,
-                'time': date.strftime("%H:%M"),
-            },
-            pressure_level_path,
-        )
-        """
-        c.retrieve(
-            'reanalysis-era5-single-levels',
-            {
-                'product_type': 'reanalysis',
-                'format': 'netcdf',
-                'variable': single_level_variables,
-                'year': date.year,
-                'month': date.month,
-                'day': date.day,
-                'time': date.strftime("%H:%M"),
-            },
-            single_level_path
-        )
-        print()
-
-        # pressure_level_data = xr.open_dataset(pressure_level_path)
         single_level_data = xr.open_dataset(single_level_path)
-        # os.remove(pressure_level_path) # remove temp files
-        # os.remove(single_level_path)
-
-        # samples += [xr.merge([pressure_level_data, single_level_data])]
         samples += [single_level_data]
 
     return xr.concat(samples, dim="time")
@@ -75,7 +59,7 @@ def create_webknossos_dataset(samples : xr.Dataset, output_variables : list[str]
 
     if os.path.exists(output_path):
         shutil.rmtree(output_path)
-    ds = wk.Dataset(name="AR_TC_random_4", # TODO: define the name somewhere else
+    ds = wk.Dataset(name=f"AR_TC_{len(samples.time)}_samples", # TODO: define the name somewhere else
                     dataset_path=output_path, voxel_size=(26e12, 26e12, 26e12)) 
     ds.default_view_configuration = DatasetViewConfiguration(zoom=1, rotation=(0, 1, 1))
 
@@ -174,5 +158,6 @@ create_chunk_for_time_interval(
 """
 
 # TODO: remove this test function
-create_chunk_with_random_samples(datetime.datetime(year=1980, month=1, day=1, hour=0), datetime.datetime(year=2023, month=1, day=1, hour=0), 3)
+# create_chunk_with_random_samples(datetime.datetime(year=1980, month=1, day=1, hour=0), datetime.datetime(year=2023, month=1, day=1, hour=0), 100)
+create_chunk_for_time_interval(start_date = datetime.datetime(year=1980, month=1, day=1, hour=0), end_date = datetime.datetime(year=1980, month=2, day=1, hour=0), hours_between_samples = 24)
 
