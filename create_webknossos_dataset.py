@@ -151,7 +151,7 @@ def create_chunk_with_random_samples(start_date : datetime.datetime, end_date : 
 
 # computes the the daily mean values of the z500 variable for a day of the year across an interval of years
 # For example, if from_year=1980, to_year=2020, month = 2 and day = 3, then the mean values for the 3rd of February across all years is calculated
-def compute_z500_mean_values_for_day(from_year : int, to_year : int, month : int, day : int) -> xr.DataArray:
+def compute_z500_mean_values_for_day(from_year : int, to_year : int, month : int, day : int) -> xr.Dataset:
     dates = []
     for year in range(from_year, to_year + 1):  
         # skip if month = 2, day = 29 and year is not a leap year
@@ -177,17 +177,43 @@ def compute_z500_mean_values_for_day(from_year : int, to_year : int, month : int
 
 # computes the the daily mean values of the z500 variable for each day of the year across an interval of years
 # For example, if from_year=1980, to_year=2020, then the mean values for each day of the year across all years in the interval is calculated
-def compute_z500_mean_values(from_year : int, to_year : int) -> xr.DataArray:
-    average_per_day = xr.DataArray()
+def compute_z500_mean_values(from_year : int, to_year : int) -> xr.Dataset:
+    """
+    average_per_day = xr.Dataset(
+        data_vars = {
+            'z500': (['day_of_year', 'latitude', 'longitude'], np.zeros((365, 721, 1440))),
+        },
+        coords = {
+            'day_of_year': range(1, 366),
+            'latitude': range(-90, 90.5, 0.5),
+            'longitude': range(0, 1440)
+        }
+    )
+    """
+    average_per_day = xr.Dataset()
 
     # iterate over all days of the year with (month, day)
     leap_year = 2020
     for month in range(1, 2): # TODO: use this 13): # Month is always 1..12
         for day in range(1, 3): # TODO: use this monthrange(leap_year, month)[1] + 1):
             average_for_this_day = compute_z500_mean_values_for_day(from_year, to_year, month, day)
+            day_of_year = datetime.datetime(year=leap_year, month=month, day=day).timetuple().tm_yday
+            print(f"day_of_year: {day_of_year}")
+
+            # write this at the 'day_of_year' position into average_per_day
+            # average_per_day['z500'].loc[{'day_of_year': day_of_year}] = average_for_this_day['z']
+
+            # average_per_day.loc[{'day_of_year': day_of_year}] = average_for_this_day
+
+            # TODO: this doesn't work
+            # it adds a new dimension 'day' with size (day_of_year), instead of adding a new dimension 'day_of_year' with size 1 and coordinate value day_of_year
+            average_for_this_day = average_for_this_day.expand_dims({'day': datetime.datetime(year=leap_year, month=month, day=day).timetuple().tm_yday}, axis=0)
+            print(f"average_for_this_day: {average_for_this_day}")
             average_per_day = xr.concat([average_per_day, average_for_this_day], dim='day')
 
     print(f"average_per_day: {average_per_day}")
+
+    return average_per_day
 
 """
 create_chunk_for_time_interval(
