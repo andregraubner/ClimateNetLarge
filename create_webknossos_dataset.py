@@ -16,6 +16,7 @@ from webknossos import webknossos_context
 from pathlib import Path
 import numpy as np
 import xarray as xr
+from calendar import monthrange
 
 webknossos_token = "hAswxSKPyjrxSKyrYIqGFw" # TODO: don't save this in code
 
@@ -148,7 +149,46 @@ def create_chunk_with_random_samples(start_date : datetime.datetime, end_date : 
 
     create_chunk(dates, chunk_name)
 
-# TODO: remove this test function
+# computes the the daily mean values of the z500 variable for a day of the year across an interval of years
+# For example, if from_year=1980, to_year=2020, month = 2 and day = 3, then the mean values for the 3rd of February across all years is calculated
+def compute_z500_mean_values_for_day(from_year : int, to_year : int, month : int, day : int) -> xr.DataArray:
+    dates = []
+    for year in range(from_year, to_year + 1):  
+        # skip if month = 2, day = 29 and year is not a leap year
+        if month == 2 and day == 29 and year % 4 != 0:
+            continue
+        dates += pandas.date_range(
+            start=datetime.datetime(year=year, month=month, day=day, hour=0),
+            end=datetime.datetime(year=year, month=month, day=day, hour=3), freq="H" # TODO: use this: 23), freq="H"
+        ).to_series().dt.to_period("H").tolist()
+
+    print(f"Computing z500 mean values for {len(dates)} samples")
+    print(f"dates: {dates}")
+    
+    samples = download_samples(dates, [], None, ['geopotential'])
+
+
+    print(f"samples: {samples}")
+
+    average = samples.mean(dim='time')
+    print(f"average: {average}")
+
+    return average
+
+# computes the the daily mean values of the z500 variable for each day of the year across an interval of years
+# For example, if from_year=1980, to_year=2020, then the mean values for each day of the year across all years in the interval is calculated
+def compute_z500_mean_values(from_year : int, to_year : int) -> xr.DataArray:
+    average_per_day = xr.DataArray()
+
+    # iterate over all days of the year with (month, day)
+    leap_year = 2020
+    for month in range(1, 2): # TODO: use this 13): # Month is always 1..12
+        for day in range(1, 3): # TODO: use this monthrange(leap_year, month)[1] + 1):
+            average_for_this_day = compute_z500_mean_values_for_day(from_year, to_year, month, day)
+            average_per_day = xr.concat([average_per_day, average_for_this_day], dim='day')
+
+    print(f"average_per_day: {average_per_day}")
+
 """
 create_chunk_for_time_interval(
     start_date = datetime.datetime(year=2004, month=1, day=1, hour=0),
@@ -157,7 +197,8 @@ create_chunk_for_time_interval(
 )
 """
 
-# TODO: remove this test function
 # create_chunk_with_random_samples(datetime.datetime(year=1980, month=1, day=1, hour=0), datetime.datetime(year=2023, month=1, day=1, hour=0), 100)
-create_chunk_for_time_interval(start_date = datetime.datetime(year=1980, month=1, day=1, hour=0), end_date = datetime.datetime(year=1980, month=2, day=1, hour=0), hours_between_samples = 24)
+# create_chunk_for_time_interval(start_date = datetime.datetime(year=1980, month=1, day=1, hour=0), end_date = datetime.datetime(year=1980, month=2, day=1, hour=0), hours_between_samples = 24)
 
+# compute_z500_mean_values_for_day(from_year=2015, to_year=2021, month=2, day=29).to_netcdf("data/z500_mean_values.nc")
+compute_z500_mean_values(from_year=2020, to_year=2021).to_netcdf("data/z500_mean_values.nc")
