@@ -22,7 +22,7 @@ webknossos_token = "hAswxSKPyjrxSKyrYIqGFw" # TODO: don't save this in code
 
 def download_sample(date : datetime.datetime, single_level_variables : list[str]) -> None:
     single_level_path = f"data/temp/single_level_{date.year}_{date.month}_{date.day}_{date.strftime('%H:%M')}:00.nc"
-    c = cdsapi.Client()
+    c = cdsapi.Client(quiet=True)
     c.retrieve(
         'reanalysis-era5-single-levels',
         {
@@ -47,9 +47,9 @@ def download_samples(dates : list[datetime.datetime], pressure_level_variables :
     Path("data/temp").mkdir(parents=True, exist_ok=True)
 
     with Pool(100) as pool:
-        pool.starmap(download_sample, tqdm(zip(dates, repeat(single_level_variables)), total=len(dates)))
+        pool.starmap(download_sample, zip(dates, repeat(single_level_variables)))
     
-    for date in tqdm(dates):
+    for date in dates:
         single_level_path = f"data/temp/single_level_{date.year}_{date.month}_{date.day}_{date.strftime('%H:%M')}:00.nc"
         single_level_data = xr.open_dataset(single_level_path)
         samples += [single_level_data]
@@ -159,19 +159,12 @@ def compute_z500_mean_values_for_day(from_year : int, to_year : int, month : int
             continue
         dates += pandas.date_range(
             start=datetime.datetime(year=year, month=month, day=day, hour=0),
-            end=datetime.datetime(year=year, month=month, day=day, hour=3), freq="H" # TODO: use this: 23), freq="H"
+            end=datetime.datetime(year=year, month=month, day=day, hour=23),
+            freq="H",
         ).to_series().dt.to_period("H").tolist()
 
-    print(f"Computing z500 mean values for {len(dates)} samples")
-    print(f"dates: {dates}")
-    
     samples = download_samples(dates, [], None, ['geopotential'])
-
-
-    print(f"samples: {samples}")
-
     average = samples.mean(dim='time')
-    print(f"average: {average}")
 
     return average
 
@@ -190,28 +183,20 @@ def compute_z500_mean_values(from_year : int, to_year : int) -> xr.Dataset:
         }
     )
     """
-    average_per_day = xr.Dataset()
 
     # iterate over all days of the year with (month, day)
+    average_per_day = []
+    pbar = tqdm(total=365)
     leap_year = 2020
-    for month in range(1, 2): # TODO: use this 13): # Month is always 1..12
-        for day in range(1, 3): # TODO: use this monthrange(leap_year, month)[1] + 1):
-            average_for_this_day = compute_z500_mean_values_for_day(from_year, to_year, month, day)
+    for month in range(1, 13): # Month is always 1..12
+        for day in range(1, monthrange(leap_year, month)[1] + 1):
             day_of_year = datetime.datetime(year=leap_year, month=month, day=day).timetuple().tm_yday
-            print(f"day_of_year: {day_of_year}")
-
-            # write this at the 'day_of_year' position into average_per_day
-            # average_per_day['z500'].loc[{'day_of_year': day_of_year}] = average_for_this_day['z']
-
-            # average_per_day.loc[{'day_of_year': day_of_year}] = average_for_this_day
-
-            # TODO: this doesn't work
-            # it adds a new dimension 'day' with size (day_of_year), instead of adding a new dimension 'day_of_year' with size 1 and coordinate value day_of_year
-            average_for_this_day = average_for_this_day.expand_dims({'day': datetime.datetime(year=leap_year, month=month, day=day).timetuple().tm_yday}, axis=0)
-            print(f"average_for_this_day: {average_for_this_day}")
-            average_per_day = xr.concat([average_per_day, average_for_this_day], dim='day')
-
-    print(f"average_per_day: {average_per_day}")
+            average_for_this_day = compute_z500_mean_values_for_day(from_year, to_year, month, day)
+            average_for_this_day = average_for_this_day.assign_coords({'day_of_year': day_of_year})
+            average_per_day += [average_for_this_day]
+            pbar.update(1)
+    pbar.close()
+    average_per_day = xr.concat(average_per_day, dim='day_of_year')
 
     return average_per_day
 
@@ -227,4 +212,4 @@ create_chunk_for_time_interval(
 # create_chunk_for_time_interval(start_date = datetime.datetime(year=1980, month=1, day=1, hour=0), end_date = datetime.datetime(year=1980, month=2, day=1, hour=0), hours_between_samples = 24)
 
 # compute_z500_mean_values_for_day(from_year=2015, to_year=2021, month=2, day=29).to_netcdf("data/z500_mean_values.nc")
-compute_z500_mean_values(from_year=2020, to_year=2021).to_netcdf("data/z500_mean_values.nc")
+compute_z500_mean_values(from_year=2020, to_year=2022).to_netcdf("data/z500_mean_values.nc")
