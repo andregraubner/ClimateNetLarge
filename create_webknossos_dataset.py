@@ -1,4 +1,5 @@
 import os
+import sys
 import shutil
 from tqdm import tqdm
 from multiprocessing import Pool
@@ -20,6 +21,7 @@ from calendar import monthrange
 
 webknossos_token = "hAswxSKPyjrxSKyrYIqGFw" # TODO: don't save this in code
 
+# Retrieves a sample for the specified date
 def download_sample(date : datetime.datetime, single_level_variables : list[str]) -> None:
     single_level_path = f"data/temp/single_level_{date.year}_{date.month}_{date.day}_{date.strftime('%H:%M')}:00.nc"
     c = cdsapi.Client(quiet=True)
@@ -37,16 +39,34 @@ def download_sample(date : datetime.datetime, single_level_variables : list[str]
         single_level_path
     )
 
+# Retrieves samples for all possible combinations of years, months, days, and times (time as "%H:%M")
+def download_sample(years : list[int], months : list[int], days : list[int], times : list[str],
+                    single_level_variables : list[str]) -> None:
+    single_level_path = f"data/temp/single_level_{date.year}_{date.month}_{date.day}_{date.strftime('%H:%M')}:00.nc"
+    c = cdsapi.Client(quiet=True)
+    c.retrieve(
+        'reanalysis-era5-single-levels',
+        {
+            'product_type': 'reanalysis',
+            'format': 'netcdf',
+            'variable': single_level_variables,
+            'year': years,
+            'month': month,
+            'day': days,
+            'time': date.strftime("%H:%M"),
+        },
+        single_level_path
+    )
+
 # Downloads samples from the ERA5 dataset for a timestamp
 # Retrieves data on specific pressure levels, then retrieves data on single levels, then combines them
 # Returns the combined data
-# TODO: remove unused parameters
-def download_samples(dates : list[datetime.datetime], pressure_level_variables : list[str], pressure_level : int, single_level_variables : list[str]) -> None:
+def download_samples(dates : list[datetime.datetime], single_level_variables : list[str]) -> None:
     samples = []
 
     Path("data/temp").mkdir(parents=True, exist_ok=True)
 
-    with Pool(100) as pool:
+    with Pool(100) as pool: # too much parallelizm gives our jobs low priority by the API
         pool.starmap(download_sample, zip(dates, repeat(single_level_variables)))
     
     for date in dates:
@@ -186,7 +206,7 @@ def compute_z500_mean_values(from_year : int, to_year : int) -> xr.Dataset:
 
     # iterate over all days of the year with (month, day)
     average_per_day = []
-    pbar = tqdm(total=365)
+    pbar = tqdm(total=365, file=sys.stdout)
     leap_year = 2020
     for month in range(1, 13): # Month is always 1..12
         for day in range(1, monthrange(leap_year, month)[1] + 1):
@@ -195,6 +215,10 @@ def compute_z500_mean_values(from_year : int, to_year : int) -> xr.Dataset:
             average_for_this_day = average_for_this_day.assign_coords({'day_of_year': day_of_year})
             average_per_day += [average_for_this_day]
             pbar.update(1)
+            print()
+            # print(end=' ', flush=True)
+            # pbar.refresh()
+            # sys.stdout.flush()
     pbar.close()
     average_per_day = xr.concat(average_per_day, dim='day_of_year')
 
@@ -212,4 +236,4 @@ create_chunk_for_time_interval(
 # create_chunk_for_time_interval(start_date = datetime.datetime(year=1980, month=1, day=1, hour=0), end_date = datetime.datetime(year=1980, month=2, day=1, hour=0), hours_between_samples = 24)
 
 # compute_z500_mean_values_for_day(from_year=2015, to_year=2021, month=2, day=29).to_netcdf("data/z500_mean_values.nc")
-compute_z500_mean_values(from_year=2020, to_year=2022).to_netcdf("data/z500_mean_values.nc")
+compute_z500_mean_values(from_year=2020, to_year=2020).to_netcdf("data/z500_mean_values.nc")
