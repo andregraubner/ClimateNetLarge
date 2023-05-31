@@ -39,29 +39,10 @@ def download_sample(date : datetime.datetime, single_level_variables : list[str]
         single_level_path
     )
 
-# Retrieves samples for all possible combinations of years, months, days, and times (time as "%H:%M")
-def download_sample(years : list[int], months : list[int], days : list[int], times : list[str],
-                    single_level_variables : list[str]) -> None:
-    single_level_path = f"data/temp/single_level_{date.year}_{date.month}_{date.day}_{date.strftime('%H:%M')}:00.nc"
-    c = cdsapi.Client(quiet=True)
-    c.retrieve(
-        'reanalysis-era5-single-levels',
-        {
-            'product_type': 'reanalysis',
-            'format': 'netcdf',
-            'variable': single_level_variables,
-            'year': years,
-            'month': month,
-            'day': days,
-            'time': date.strftime("%H:%M"),
-        },
-        single_level_path
-    )
-
 # Downloads samples from the ERA5 dataset for a timestamp
 # Retrieves data on specific pressure levels, then retrieves data on single levels, then combines them
 # Returns the combined data
-def download_samples(dates : list[datetime.datetime], single_level_variables : list[str]) -> None:
+def retrieve_samples(dates : list[datetime.datetime], single_level_variables : list[str]) -> None:
     samples = []
 
     Path("data/temp").mkdir(parents=True, exist_ok=True)
@@ -75,6 +56,34 @@ def download_samples(dates : list[datetime.datetime], single_level_variables : l
         samples += [single_level_data]
 
     return xr.concat(samples, dim="time")
+
+# Downloads samples from the ERA5 dataset for all possible combinations of years, months, days, and times (time as "%H:%M")
+def retrieve_samples(years : list[int], months : list[int], days : list[int], times : list[str],
+                    single_level_variables : list[str]) -> None:
+
+    Path("data/temp").mkdir(parents=True, exist_ok=True)
+    single_level_path = f"data/temp/single_level_tmp.nc"
+
+    c = cdsapi.Client(quiet=True)
+    c.retrieve(
+        'reanalysis-era5-single-levels',
+        {
+            'product_type': 'reanalysis',
+            'format': 'netcdf',
+            'variable': single_level_variables,
+            'year': years,
+            'month': months,
+            'day': days,
+            'time': times,
+        },
+        single_level_path
+    )
+
+    data = xr.open_dataset(single_level_path)
+
+    os.remove(single_level_path)
+
+    return  data
 
 def create_webknossos_dataset(samples : xr.Dataset, output_variables : list[str], output_path : str) -> None:
 
@@ -133,7 +142,7 @@ def create_chunk(dates : list[pandas.Period], chunk_name : str) -> None:
         'total column water vapour (TCWV)',
         'integrated vapour transport (IVT)'
     ]
-    samples = download_samples(dates, pressure_level_variables, pressure_level, single_level_variables)
+    samples = retrieve_samples(dates, pressure_level_variables, pressure_level, single_level_variables)
     create_webknossos_dataset(
         samples,
         output_variables,
@@ -172,18 +181,11 @@ def create_chunk_with_random_samples(start_date : datetime.datetime, end_date : 
 # computes the the daily mean values of the z500 variable for a day of the year across an interval of years
 # For example, if from_year=1980, to_year=2020, month = 2 and day = 3, then the mean values for the 3rd of February across all years is calculated
 def compute_z500_mean_values_for_day(from_year : int, to_year : int, month : int, day : int) -> xr.Dataset:
-    dates = []
-    for year in range(from_year, to_year + 1):  
-        # skip if month = 2, day = 29 and year is not a leap year
-        if month == 2 and day == 29 and year % 4 != 0:
-            continue
-        dates += pandas.date_range(
-            start=datetime.datetime(year=year, month=month, day=day, hour=0),
-            end=datetime.datetime(year=year, month=month, day=day, hour=23),
-            freq="H",
-        ).to_series().dt.to_period("H").tolist()
+    years = list(range(from_year, to_year + 1))
+    times = [f"{hour:02d}:00" for hour in range(0, 24)]
 
-    samples = download_samples(dates, [], None, ['geopotential'])
+    samples = retrieve_samples(years, [month], [day], times, ['geopotential'])
+
     average = samples.mean(dim='time')
 
     return average
