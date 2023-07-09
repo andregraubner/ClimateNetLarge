@@ -42,7 +42,7 @@ def download_sample(date : datetime.datetime, single_level_variables : list[str]
 # Downloads samples from the ERA5 dataset for a timestamp
 # Retrieves data on specific pressure levels, then retrieves data on single levels, then combines them
 # Returns the combined data
-def retrieve_samples(dates : list[datetime.datetime], single_level_variables : list[str]) -> None:
+def retrieve_samples_date_list(dates : list[datetime.datetime], single_level_variables : list[str]) -> None:
     samples = []
 
     Path("data/temp").mkdir(parents=True, exist_ok=True)
@@ -58,7 +58,7 @@ def retrieve_samples(dates : list[datetime.datetime], single_level_variables : l
     return xr.concat(samples, dim="time")
 
 # Downloads samples from the ERA5 dataset for all possible combinations of years, months, days, and times (time as "%H:%M")
-def retrieve_samples(years : list[int], months : list[int], days : list[int], times : list[str],
+def retrieve_samples_multiplex(years : list[int], months : list[int], days : list[int], times : list[str],
                     single_level_variables : list[str]) -> None:
 
     Path("data/temp").mkdir(parents=True, exist_ok=True)
@@ -89,7 +89,7 @@ def create_webknossos_dataset(samples : xr.Dataset, output_variables : list[str]
 
     if os.path.exists(output_path):
         shutil.rmtree(output_path)
-    ds = wk.Dataset(name=f"AR_TC_{len(samples.time)}_samples", # TODO: define the name somewhere else
+    ds = wk.Dataset(name=f"AR_TC_{len(samples.time)}_samples_02", # TODO: define the name somewhere else
                     dataset_path=output_path, voxel_size=(26e12, 26e12, 26e12)) 
     ds.default_view_configuration = DatasetViewConfiguration(zoom=1, rotation=(0, 1, 1))
 
@@ -126,11 +126,6 @@ def create_webknossos_dataset(samples : xr.Dataset, output_variables : list[str]
 def create_chunk(dates : list[pandas.Period], chunk_name : str) -> None:
     print(f"Creating chunk {chunk_name}")
 
-    pressure_level_variables = [
-        # 'u_component_of_wind', # TODO: don't define this here
-        # 'v_component_of_wind',
-    ]
-    pressure_level = 850 # TODO: don't define this here
     single_level_variables = [
         'mean_sea_level_pressure', # TODO: don't define this here
         'total_column_water_vapour',
@@ -142,7 +137,7 @@ def create_chunk(dates : list[pandas.Period], chunk_name : str) -> None:
         'total column water vapour (TCWV)',
         'integrated vapour transport (IVT)'
     ]
-    samples = retrieve_samples(dates, pressure_level_variables, pressure_level, single_level_variables)
+    samples = retrieve_samples_date_list(dates, single_level_variables)
     create_webknossos_dataset(
         samples,
         output_variables,
@@ -164,7 +159,8 @@ def create_chunk_for_time_interval(start_date : datetime.datetime, end_date : da
 
     create_chunk(dates, chunk_name)
 
-def create_chunk_with_random_samples(start_date : datetime.datetime, end_date : datetime, number_of_samples : int) -> None:
+def create_chunk_with_random_samples(start_date : datetime.datetime, end_date : datetime, number_of_samples : int,
+                                     excluded_dates_path : str = None) -> None:
     if start_date > end_date:
         raise ValueError("start_date must be before end_date")
     if start_date.minute != 0 or start_date.second != 0 or start_date.microsecond != 0:
@@ -172,11 +168,33 @@ def create_chunk_with_random_samples(start_date : datetime.datetime, end_date : 
     if number_of_samples <= 0:
         raise ValueError("number_of_samples must be greater than 0")
 
-    dates = pandas.date_range(start_date, end_date, freq="H").to_series().sample(number_of_samples).dt.to_period("H").tolist()
+    ## TODO: better scheme do design names
     chunk_name=f"chunk_random_{start_date.year}_{start_date.month}_{start_date.day}_{start_date.strftime('%H:%M')}-" + \
-        f"{end_date.year}_{end_date.month}_{end_date.day}_{end_date.strftime('%H:%M')}_samples_{number_of_samples}"
+        f"{end_date.year}_{end_date.month}_{end_date.day}_{end_date.strftime('%H:%M')}_samples_{number_of_samples}_02"
 
-    create_chunk(dates, chunk_name)
+    if excluded_dates_path is not None:
+        # as data range
+        excluded_dates = pandas.Series(np.load(excluded_dates_path))
+    else:
+        excluded_dates = []
+
+    all_dates = pandas.date_range(start_date, end_date, freq="H").to_series()
+
+    print(f"number of all dates: {len(all_dates)}")
+    remaining_dates = all_dates[~all_dates.isin(excluded_dates)]
+    print(f"number of remaining dates: {len(remaining_dates)}")
+
+    sampled_dates = remaining_dates.sample(number_of_samples).dt.to_period("H").tolist()
+
+    # save np to disk
+    np.save('./data/timestamps/'+chunk_name+'_dates.npy', sampled_dates)
+
+    # save dates to txt file
+    with open('./data/timestamps/'+chunk_name+'_dates.txt', 'w') as f:
+        for item in sampled_dates:
+            f.write("%s\n" % item.strftime('%Y-%m-%dT%H:%M:%S.000000000'))
+
+    create_chunk(sampled_dates, chunk_name)
 
 # computes the the daily mean values of the z500 variable for a day of the year across an interval of years
 # For example, if from_year=1980, to_year=2020, month = 2 and day = 3, then the mean values for the 3rd of February across all years is calculated
@@ -184,7 +202,7 @@ def compute_z500_mean_values_for_day(from_year : int, to_year : int, month : int
     years = list(range(from_year, to_year + 1))
     times = [f"{hour:02d}:00" for hour in range(0, 24)]
 
-    samples = retrieve_samples(years, [month], [day], times, ['geopotential'])
+    samples = retrieve_samples_multiplex(years, [month], [day], times, ['geopotential'])
 
     average = samples.mean(dim='time')
 
@@ -226,16 +244,17 @@ def compute_z500_mean_values(from_year : int, to_year : int) -> xr.Dataset:
 
     return average_per_day
 
-"""
-create_chunk_for_time_interval(
-    start_date = datetime.datetime(year=2004, month=1, day=1, hour=0),
-    end_date = datetime.datetime(year=2004, month=1, day=1, hour=0), # inclusively
-    hours_between_samples = 12,
-)
-"""
+# create_chunk_for_time_interval(
+#     start_date = datetime.datetime(year=2004, month=1, day=1, hour=0),
+#     end_date = datetime.datetime(year=2004, month=1, day=1, hour=0), # inclusively
+#     hours_between_samples = 12,
+#     exclude_timestamps = '/data/timestamps/chunk_random_1980_1_1_00:00-2023_1_1_00:00_samples_5000_dates.npy'
+# )
 
-# create_chunk_with_random_samples(datetime.datetime(year=1980, month=1, day=1, hour=0), datetime.datetime(year=2023, month=1, day=1, hour=0), 100)
+create_chunk_with_random_samples(datetime.datetime(year=1980, month=1, day=1, hour=0), datetime.datetime(year=2023, month=1, day=1, hour=0), 10,
+                                 excluded_dates_path = './data/timestamps/chunk_random_1980_1_1_00:00-2023_1_1_00:00_samples_5000_dates.npy')
 # create_chunk_for_time_interval(start_date = datetime.datetime(year=1980, month=1, day=1, hour=0), end_date = datetime.datetime(year=1980, month=2, day=1, hour=0), hours_between_samples = 24)
 
 # compute_z500_mean_values_for_day(from_year=2015, to_year=2021, month=2, day=29).to_netcdf("data/z500_mean_values.nc")
-compute_z500_mean_values(from_year=2020, to_year=2020).to_netcdf("data/z500_mean_values.nc")
+
+# compute_z500_mean_values(from_year=2020, to_year=2020).to_netcdf("data/z500_mean_values.nc")
