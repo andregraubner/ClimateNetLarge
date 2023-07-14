@@ -22,8 +22,8 @@ from calendar import monthrange
 webknossos_token = "hAswxSKPyjrxSKyrYIqGFw" # TODO: don't save this in code
 
 # Retrieves a sample for the specified date
-def download_sample(date : datetime.datetime, single_level_variables : list[str]) -> None:
-    single_level_path = f"data/temp/single_level_{date.year}_{date.month}_{date.day}_{date.strftime('%H:%M')}:00.nc"
+def download_sample_single_level(date : datetime.datetime, single_level_variables : list[str]) -> None:
+    file_path = f"data/temp/sample_{date.year}_{date.month}_{date.day}_{date.strftime('%H:%M')}:00.nc"
     c = cdsapi.Client(quiet=True)
     c.retrieve(
         'reanalysis-era5-single-levels',
@@ -36,24 +36,52 @@ def download_sample(date : datetime.datetime, single_level_variables : list[str]
             'day': date.day,
             'time': date.strftime("%H:%M"),
         },
-        single_level_path
+        file_path
+    )
+
+# Retrieves a sample for the specified date
+def download_sample_pressure_level(date : datetime.datetime, variable_and_level : tuple[str,int]) -> None:
+    variable, level = variable_and_level
+    file_path = f"data/temp/sample_{date.year}_{date.month}_{date.day}_{date.strftime('%H:%M')}:00.nc"
+    c = cdsapi.Client(quiet=True)
+    c.retrieve(
+        'reanalysis-era5-pressure-levels',
+        {
+            'product_type': 'reanalysis',
+            'format': 'netcdf',
+            'variable': variable,
+            'pressure_level': level,
+            'year': date.year,
+            'month': date.month,
+            'day': date.day,
+            'time': date.strftime("%H:%M"),
+        },
+        file_path
     )
 
 # Downloads samples from the ERA5 dataset for a timestamp
-# Retrieves data on specific pressure levels, then retrieves data on single levels, then combines them
-# Returns the combined data
-def retrieve_samples_date_list(dates : list[datetime.datetime], single_level_variables : list[str]) -> None:
+# Retrieves data on specific pressure level or retrieves data on single levels
+# Exactly one of those two options must be specified (a combination could be implemented when needed)
+def retrieve_samples_date_list(dates : list[datetime.datetime], single_level_variables : list[str],
+                               pressure_variable_and_level : tuple[str,int]) -> None:
     samples = []
+    if (pressure_variable_and_level != None and len(single_level_variables) > 0) or \
+       (pressure_variable_and_level == None and len(single_level_variables) == 0):
+        raise ValueError("Exactly one of pressure_level_variables_and_levels and single_level_variables must be specified")
 
     Path("data/temp").mkdir(parents=True, exist_ok=True)
 
-    with Pool(100) as pool: # too much parallelizm gives our jobs low priority by the API
-        pool.starmap(download_sample, zip(dates, repeat(single_level_variables)))
+    with Pool(100) as pool: # too much parallelism gives our jobs low priority by the API
+        if len(pressure_variable_and_level) > 0:
+            pool.starmap(download_sample_pressure_level, zip(dates, repeat(pressure_variable_and_level)))
+        else:
+            pool.starmap(download_sample_single_level, zip(dates, repeat(single_level_variables)))
     
     for date in dates:
-        single_level_path = f"data/temp/single_level_{date.year}_{date.month}_{date.day}_{date.strftime('%H:%M')}:00.nc"
-        single_level_data = xr.open_dataset(single_level_path)
-        samples += [single_level_data]
+        file_path = f"data/temp/sample_{date.year}_{date.month}_{date.day}_{date.strftime('%H:%M')}:00.nc"
+        sample = xr.open_dataset(file_path)
+        os.remove(file_path)
+        samples += [sample]
 
     return xr.concat(samples, dim="time")
 
@@ -87,10 +115,11 @@ def retrieve_samples_multiplex(years : list[int], months : list[int], days : lis
     return  data
 
 def create_webknossos_dataset(samples : xr.Dataset, output_variables : list[str], output_path : str) -> None:
+    print(samples)
 
     if os.path.exists(output_path):
         shutil.rmtree(output_path)
-    ds = wk.Dataset(name=f"AR_TC_{len(samples.time)}_samples_02", # TODO: define the name somewhere else
+    ds = wk.Dataset(name=f"blocking_events_{len(samples.time)}_01", # TODO: define the name somewhere else
                     dataset_path=output_path, voxel_size=(26e12, 26e12, 26e12)) 
     ds.default_view_configuration = DatasetViewConfiguration(zoom=1, rotation=(0, 1, 1))
 
@@ -113,11 +142,34 @@ def create_webknossos_dataset(samples : xr.Dataset, output_variables : list[str]
                 ivt = np.sqrt(samples.get('p72.162')**2 + samples.get('p71.162')**2)
                 ch.add_mag(1, compress=True).write(ivt)
                 ch.default_view_configuration = LayerViewConfiguration(color=(153, 193, 241), intensity_range=(0, 1000), is_disabled=True)
+            case 'z500 (height at 500 hPa)':
+                ch.add_mag(1, compress=True).write(samples.get('z').values)
+                ch.default_view_configuration = LayerViewConfiguration(color=(17, 212, 17), intensity_range=(0, 16000), is_disabled=True)
+            case 'deviation from z500 mean' | 'deviation from z500 denoised mean' | 'z500 mean' | 'z500 denoised mean':
+                ch.add_mag(1, compress=True).write(samples.get(variable_name).values)
+                ch.default_view_configuration = LayerViewConfiguration(color=(153, 193, 241), intensity_range=(0, 1000))
             case _:
                 raise NotImplementedError(f"Variable type {variable_name} specified but not implemented")
 
     with webknossos_context(token=webknossos_token):
         ds.upload()
+
+# computes the anomaly of the z500 variable for each sample in the dataset
+def compute_z500_anomaly(samples : xr.Dataset) -> xr.Dataset:
+    z500_mean = xr.load_dataset("/data/z500_mean_values.nc")
+
+    # FIXME:
+    raise NotImplementedError("This function is not yet implemented")
+    # for every sample:
+    # retrieve z500 ('z' variable) and the corresponding date
+    # compute 'day_of_the_year' from date
+    # fetch the mean / denoised_mean for this day_of_the_year
+    # compute deviation from mean / denoised_mean
+    # add deviation as new variable to samples
+    # the expected keys are 'deviation from z500 mean' and 'deviation from z500 denoised mean'
+    # Also add 'z500 mean' and 'z500 denoised mean' as new variables to samples for debugging
+
+    return samples
 
 
 # creates a chunk of ERA5 data in webKnossos format 
@@ -125,6 +177,7 @@ def create_webknossos_dataset(samples : xr.Dataset, output_variables : list[str]
 # the samples are spaced by delta_between_samples
 # samples are only possible at full hours
 def create_chunk(dates : list[pandas.Period], single_level_variables : list[str],
+                 pressure_level_variables_and_level : tuple[str, int],
                  output_variables : list[str], chunk_name : str) -> None:
     print(f"Creating chunk {chunk_name}")
 
@@ -137,11 +190,14 @@ def create_chunk(dates : list[pandas.Period], single_level_variables : list[str]
             f.write("%s\n" % item.strftime('%Y-%m-%dT%H:%M:%S.000000000'))
 
 
-    samples = retrieve_samples_date_list(dates, single_level_variables)
+    samples = retrieve_samples_date_list(dates, single_level_variables, pressure_level_variables_and_level)
+
+    samples = compute_z500_anomaly(samples)
+    
     create_webknossos_dataset(
         samples,
         output_variables,
-        output_path=f"data/chunks/{chunk_name}.wkw"
+        output_path=f"data/chunks/{chunk_name}.wkw",
     )
     samples.to_netcdf(f"data/chunks/{chunk_name}.nc")
 
@@ -159,18 +215,15 @@ def create_chunk_for_time_interval_BE(start_date : datetime.datetime, end_date :
 
     single_level_variables = []
 
-    pressure_level_variables_and_level = [
-        ('geopotential', 500),
-    ]
+    pressure_variable_and_level = ('geopotential', 500)
 
     output_variables = [
         'z500 (height at 500 hPa)',
-        'deviation from long-term z500 mean',
+        'z500 mean',
+        'deviation from z500 mean',
     ]
 
-    # FIXME: continue here: pass parameters to create_chunk, implement output_variables
-
-    create_chunk(dates, chunk_name)
+    create_chunk(dates, single_level_variables, pressure_variable_and_level, output_variables, chunk_name)
 
 def create_chunk_with_random_samples_AR_TC(start_date : datetime.datetime, end_date : datetime, number_of_samples : int,
                                      excluded_dates_path : str = None) -> None:
@@ -205,13 +258,16 @@ def create_chunk_with_random_samples_AR_TC(start_date : datetime.datetime, end_d
         'vertical_integral_of_northward_water_vapour_flux',
         'vertical_integral_of_eastward_water_vapour_flux',
     ]
+
+    pressure_variable_and_level = []
+
     output_variables = [
         'mean pressure at sea level (MSL)',
         'total column water vapour (TCWV)',
         'integrated vapour transport (IVT)'
     ]
 
-    create_chunk(sampled_dates, single_level_variables, output_variables, chunk_name)
+    create_chunk(sampled_dates, single_level_variables, pressure_variable_and_level, output_variables, chunk_name)
 
 # computes the the daily mean values of the z500 variable for a day of the year across an interval of years
 # For example, if from_year=1980, to_year=2020, month = 2 and day = 3, then the mean values for the 3rd of February across all years is calculated
@@ -264,9 +320,8 @@ def compute_z500_mean_values(from_year : int, to_year : int) -> xr.Dataset:
 # create_chunk_with_random_samples_AR_TC(datetime.datetime(year=1980, month=1, day=1, hour=0), datetime.datetime(year=2023, month=1, day=1, hour=0), 10,
 #                                  excluded_dates_path = './data/timestamps/chunk_random_1980_1_1_00:00-2023_1_1_00:00_samples_5000_dates.npy')
 
-compute_z500_mean_values(from_year=1980, to_year=2022).to_netcdf("data/z500_mean_values.nc")
+# compute_z500_mean_values(from_year=1980, to_year=2022).to_netcdf("data/z500_mean_values.nc")
 
-# create_chunk_for_time_interval_BE(start_date = datetime.datetime(year=1980, month=1, day=1, hour=0),
-#                                   end_date = datetime.datetime(year=1980, month=2, day=1, hour=0),
-#                                   hours_between_samples = 24)
-
+create_chunk_for_time_interval_BE(start_date = datetime.datetime(year=2000, month=1, day=1, hour=0),
+                                  end_date = datetime.datetime(year=2000, month=1, day=7, hour=0),
+                                  hours_between_samples = 24)
