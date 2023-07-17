@@ -43,7 +43,7 @@ def download_sample_single_level(date : datetime.datetime, single_level_variable
 def download_sample_pressure_level(date : datetime.datetime, variable_and_level : tuple[str,int]) -> None:
     variable, level = variable_and_level
     file_path = f"data/temp/sample_{date.year}_{date.month}_{date.day}_{date.strftime('%H:%M')}:00.nc"
-    c = cdsapi.Client(quiet=True)
+    c = cdsapi.Client(quiet=False)
     c.retrieve(
         'reanalysis-era5-pressure-levels',
         {
@@ -80,7 +80,7 @@ def retrieve_samples_date_list(dates : list[datetime.datetime], single_level_var
     for date in dates:
         file_path = f"data/temp/sample_{date.year}_{date.month}_{date.day}_{date.strftime('%H:%M')}:00.nc"
         sample = xr.open_dataset(file_path)
-        os.remove(file_path)
+        # os.remove(file_path)
         samples += [sample]
 
     return xr.concat(samples, dim="time")
@@ -119,7 +119,7 @@ def create_webknossos_dataset(samples : xr.Dataset, output_variables : list[str]
 
     if os.path.exists(output_path):
         shutil.rmtree(output_path)
-    ds = wk.Dataset(name=f"blocking_events_{len(samples.time)}_03", # TODO: define the name somewhere else
+    ds = wk.Dataset(name=f"blocking_events_{len(samples.time)}_04", # TODO: define the name somewhere else
                     dataset_path=output_path, voxel_size=(26e12, 26e12, 26e12)) 
     ds.default_view_configuration = DatasetViewConfiguration(zoom=1, rotation=(0, 1, 1))
 
@@ -145,7 +145,7 @@ def create_webknossos_dataset(samples : xr.Dataset, output_variables : list[str]
             case 'z500 (height at 500 hPa)':
                 ch.add_mag(1, compress=True).write(samples.get('z').values)
                 ch.default_view_configuration = LayerViewConfiguration(color=(17, 212, 17), is_disabled=True)
-            case 'deviation_from_z500_mean' | 'deviation_from_z500_denoised_mean' | 'z500_mean' | 'z500_denoised_mean':
+            case 'deviation_from_z500_mean' | 'deviation_from_z500_denoised_mean' | 'z500_mean' | 'z500_denoised_mean' | 'geopotential':
                 ch.add_mag(1, compress=True).write(samples.get(variable_name).values)
                 ch.default_view_configuration = LayerViewConfiguration(color=(153, 193, 241))
             case _:
@@ -156,17 +156,21 @@ def create_webknossos_dataset(samples : xr.Dataset, output_variables : list[str]
 
 # computes the anomaly of the z500 variable for each sample in the dataset
 def compute_z500_anomaly(samples : xr.Dataset) -> xr.Dataset:
-    z500_mean = xr.load_dataset("/data/z500_mean_values.nc") # TODO: path should be in some config
+    print("computing z500 anamoly..")
+    z500_mean = xr.load_dataset("./data/z500_mean_values.nc") # TODO: path should be in some config
+    geopotential = xr.load_dataset('./data/geopotential.nc').get('z')
 
     samples = samples.assign(deviation_from_z500_mean=samples.get('z').copy())
     samples = samples.assign(z500_mean=samples.get('z').copy())
+    samples = samples.assign(geopotential=samples.get('z').copy())
 
-    for date in samples.get('time'):
+    for date in tqdm(samples.get('time')):
         day_of_year = pandas.Timestamp(date.values).timetuple().tm_yday
         mean_for_this_day = z500_mean.get('z').loc[dict(day_of_year=day_of_year)]
         samples.get('z500_mean').loc[dict(time=date)] = mean_for_this_day
         deviation = samples.get('z').loc[dict(time=date)] - mean_for_this_day
         samples.get('deviation_from_z500_mean').loc[dict(time=date)] = deviation
+        samples.get('geopotential').loc[dict(time=date)] = geopotential
         
 
     # for every sample:
@@ -175,6 +179,7 @@ def compute_z500_anomaly(samples : xr.Dataset) -> xr.Dataset:
     # add deviation as new variable to samples
     # the expected key is 'deviation_from_z500_denoised_mean'
     # Also add 'z500_denoised_mean' as new variables to samples for debugging
+
 
     return samples
 
@@ -228,6 +233,7 @@ def create_chunk_for_time_interval_BE(start_date : datetime.datetime, end_date :
         'z500 (height at 500 hPa)',
         'z500_mean',
         'deviation_from_z500_mean',
+        'geopotential',
     ]
 
     create_chunk(dates, single_level_variables, pressure_variable_and_level, output_variables, chunk_name)
@@ -243,7 +249,7 @@ def create_chunk_with_random_samples_AR_TC(start_date : datetime.datetime, end_d
 
     ## TODO: better scheme do design names
     chunk_name=f"chunk_random_{start_date.year}_{start_date.month}_{start_date.day}_{start_date.strftime('%H:%M')}-" + \
-        f"{end_date.year}_{end_date.month}_{end_date.day}_{end_date.strftime('%H:%M')}_samples_{number_of_samples}_02"
+        f"{end_date.year}_{end_date.month}_{end_date.day}_{end_date.strftime('%H:%M')}_samples_{number_of_samples}_03"
 
     if excluded_dates_path is not None:
         # as data range
