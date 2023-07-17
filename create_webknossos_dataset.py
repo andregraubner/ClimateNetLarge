@@ -119,7 +119,7 @@ def create_webknossos_dataset(samples : xr.Dataset, output_variables : list[str]
 
     if os.path.exists(output_path):
         shutil.rmtree(output_path)
-    ds = wk.Dataset(name=f"blocking_events_{len(samples.time)}_01", # TODO: define the name somewhere else
+    ds = wk.Dataset(name=f"blocking_events_{len(samples.time)}_03", # TODO: define the name somewhere else
                     dataset_path=output_path, voxel_size=(26e12, 26e12, 26e12)) 
     ds.default_view_configuration = DatasetViewConfiguration(zoom=1, rotation=(0, 1, 1))
 
@@ -141,13 +141,13 @@ def create_webknossos_dataset(samples : xr.Dataset, output_variables : list[str]
             case 'integrated vapour transport (IVT)':
                 ivt = np.sqrt(samples.get('p72.162')**2 + samples.get('p71.162')**2)
                 ch.add_mag(1, compress=True).write(ivt)
-                ch.default_view_configuration = LayerViewConfiguration(color=(153, 193, 241), intensity_range=(0, 1000), is_disabled=True)
+                ch.default_view_configuration = LayerViewConfiguration(color=(153, 193, 241), is_disabled=True)
             case 'z500 (height at 500 hPa)':
                 ch.add_mag(1, compress=True).write(samples.get('z').values)
-                ch.default_view_configuration = LayerViewConfiguration(color=(17, 212, 17), intensity_range=(0, 16000), is_disabled=True)
-            case 'deviation from z500 mean' | 'deviation from z500 denoised mean' | 'z500 mean' | 'z500 denoised mean':
+                ch.default_view_configuration = LayerViewConfiguration(color=(17, 212, 17), is_disabled=True)
+            case 'deviation_from_z500_mean' | 'deviation_from_z500_denoised_mean' | 'z500_mean' | 'z500_denoised_mean':
                 ch.add_mag(1, compress=True).write(samples.get(variable_name).values)
-                ch.default_view_configuration = LayerViewConfiguration(color=(153, 193, 241), intensity_range=(0, 1000))
+                ch.default_view_configuration = LayerViewConfiguration(color=(153, 193, 241))
             case _:
                 raise NotImplementedError(f"Variable type {variable_name} specified but not implemented")
 
@@ -156,18 +156,25 @@ def create_webknossos_dataset(samples : xr.Dataset, output_variables : list[str]
 
 # computes the anomaly of the z500 variable for each sample in the dataset
 def compute_z500_anomaly(samples : xr.Dataset) -> xr.Dataset:
-    z500_mean = xr.load_dataset("/data/z500_mean_values.nc")
+    z500_mean = xr.load_dataset("/data/z500_mean_values.nc") # TODO: path should be in some config
 
-    # FIXME:
-    raise NotImplementedError("This function is not yet implemented")
+    samples = samples.assign(deviation_from_z500_mean=samples.get('z').copy())
+    samples = samples.assign(z500_mean=samples.get('z').copy())
+
+    for date in samples.get('time'):
+        day_of_year = pandas.Timestamp(date.values).timetuple().tm_yday
+        mean_for_this_day = z500_mean.get('z').loc[dict(day_of_year=day_of_year)]
+        samples.get('z500_mean').loc[dict(time=date)] = mean_for_this_day
+        deviation = samples.get('z').loc[dict(time=date)] - mean_for_this_day
+        samples.get('deviation_from_z500_mean').loc[dict(time=date)] = deviation
+        
+
     # for every sample:
-    # retrieve z500 ('z' variable) and the corresponding date
-    # compute 'day_of_the_year' from date
-    # fetch the mean / denoised_mean for this day_of_the_year
-    # compute deviation from mean / denoised_mean
+    # fetch the denoised_mean for this day_of_the_year
+    # compute deviation denoised_mean
     # add deviation as new variable to samples
-    # the expected keys are 'deviation from z500 mean' and 'deviation from z500 denoised mean'
-    # Also add 'z500 mean' and 'z500 denoised mean' as new variables to samples for debugging
+    # the expected key is 'deviation_from_z500_denoised_mean'
+    # Also add 'z500_denoised_mean' as new variables to samples for debugging
 
     return samples
 
@@ -219,8 +226,8 @@ def create_chunk_for_time_interval_BE(start_date : datetime.datetime, end_date :
 
     output_variables = [
         'z500 (height at 500 hPa)',
-        'z500 mean',
-        'deviation from z500 mean',
+        'z500_mean',
+        'deviation_from_z500_mean',
     ]
 
     create_chunk(dates, single_level_variables, pressure_variable_and_level, output_variables, chunk_name)
@@ -322,6 +329,6 @@ def compute_z500_mean_values(from_year : int, to_year : int) -> xr.Dataset:
 
 # compute_z500_mean_values(from_year=1980, to_year=2022).to_netcdf("data/z500_mean_values.nc")
 
-create_chunk_for_time_interval_BE(start_date = datetime.datetime(year=2000, month=1, day=1, hour=0),
-                                  end_date = datetime.datetime(year=2000, month=1, day=7, hour=0),
+create_chunk_for_time_interval_BE(start_date = datetime.datetime(year=2013, month=1, day=1, hour=0),
+                                  end_date = datetime.datetime(year=2013, month=12, day=31, hour=0),
                                   hours_between_samples = 24)
