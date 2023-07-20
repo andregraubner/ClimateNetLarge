@@ -209,16 +209,13 @@ def compute_z500_anomaly(samples: xr.Dataset) -> xr.Dataset:
             time=date)] = deviation
         samples.get('geopotential').loc[dict(time=date)] = geopotential
 
-
-    plt.imsave("before.png", samples.to_array()[0,0].values)
     weights = np.sin(np.deg2rad(45)) / np.sin(np.deg2rad(samples.latitude))
     weights = np.nan_to_num(weights, nan=1, posinf=1, neginf=1)
 
     weights = np.abs(weights[None,:,None])
     weights[weights > 1] = 1 # Play around with this?
 
-    z500_mean["z"] *= weights
-    plt.imsave("after.png", samples.to_array()[0,0].values)
+    samples["deviation_from_z500_mean"] *= weights
 
     # for every sample:
     # fetch the denoised_mean for this day_of_the_year
@@ -390,7 +387,7 @@ def compute_z500_mean_values(from_year: int, to_year: int) -> xr.Dataset:
 
     return average_per_day
 
-compute_z500_anomaly(0)
+#compute_z500_anomaly(0)
 
 # create_chunk_with_random_samples_AR_TC(datetime.datetime(year=1980, month=1, day=1, hour=0), datetime.datetime(year=2023, month=1, day=1, hour=0), 10,
 #                                  excluded_dates_path = './data/timestamps/chunk_random_1980_1_1_00:00-2023_1_1_00:00_samples_5000_dates.npy')
@@ -398,7 +395,6 @@ compute_z500_anomaly(0)
 # compute_z500_mean_values(from_year=1980, to_year=2022).to_netcdf("data/z500_mean_values.nc")
 
 
-# create_chunk_for_time_interval_BE(start_date=datetime.datetime(year=2013, month=1, day=1, hour=0),
-#                                  end_date=datetime.datetime(
-#                                      year=2013, month=12, day=31, hour=0),
-#                                  hours_between_samples=24)
+create_chunk_for_time_interval_BE(start_date=datetime.datetime(year=2013, month=1, day=1, hour=0),
+                                  end_date=datetime.datetime(year=2013, month=1, day=7, hour=0), 
+                                  hours_between_samples=24)
