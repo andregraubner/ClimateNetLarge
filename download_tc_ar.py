@@ -1,6 +1,7 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Tuple
 from dateutil import parser
+from datetime import datetime, timedelta
 
 import numpy as np
 import xarray as xr
@@ -10,28 +11,33 @@ import webknossos as wk
 
 AUTH_TOKEN = ""
 PROJECT_NAME = "2023-05-TC-AR"
+DATASET_PATH = "./tmp/"
 
+os.makedirs(DATASET_PATH, exist_ok=True)
+os.makedirs(os.join(DATASET_PATH, "AR"), exist_ok=True)
+os.makedirs(os.join(DATASET_PATH, "TC"), exist_ok=True)
 
 @dataclass
 class AnnotationInfo:
     annotation_id: str
     annotator_name: str
-    annotation_time_in_seconds: int
+    annotation_start_timestamp: datetime
+    annotation_duration_in_seconds: timedelta
     task_type: str
     task_id: str
     dataset_name: str
     range: Tuple[int, int]
-    segmentation_data: np.ndarray
+    segmentation_data: np.ndarray = field(repr=False)
 
 def main():
 
-    with open("timestamps/chunk_random_1980_1_1_00_00-2023_1_1_00_00_samples_5000_dates.txt") as file:
+    with open("dates_0.txt") as file:
         timestamps_1 = [parser.parse(line.rstrip()) for line in file]
 
-    with open("timestamps/chunk_random_1980_1_1_00_00-2023_1_1_00_00_samples_5000_02_dates.txt") as file:
+    with open("dates_1.txt") as file:
         timestamps_2 = [parser.parse(line.rstrip()) for line in file]
 
-    reference = xr.open_dataset("/Users/andre/projects/climatenet_v2/data/z500_mean_values.nc")
+    reference = xr.open_dataset("reference.nc")
 
     project = wk.Project.get_by_name(PROJECT_NAME)
     tasks = list(project.get_tasks(fetch_all=True))
@@ -63,27 +69,27 @@ def main():
 
             # Create xarray dataset
             data = xr.DataArray(
-                data=seg_data, 
-                dims=["ts", "latitude", "longitude"],
+                data=seg_data[None], 
+                dims=["annotator", "ts", "latitude", "longitude"],
                 coords={
+                    "annotator": [annotation.owner_name],
                     "ts": ts,
                     "longitude": reference.coords["longitude"],
                     "latitude": reference.coords["latitude"]
-                },
-                attrs={
-                    # might want to add additional metadata here
-                    "dataset_name": annotation.dataset_name,
-                    "description": annotation.description,
-                    "annotator_name": annotation.owner_name
                 })
             
             # Save to file
-            data = data.to_dataset(name="label")
+            data = xr.Dataset(
+                data_vars={"label": data},
+                attrs={
+                    # might want to add additional metadata here
+                    "dataset_name": annotation.dataset_name,
+                })
+
             data.to_netcdf(
-                path=f"dataset/{annotation.annotation_id}.nc", 
+                path=f"{DATASET_PATH}/{task.task_type.name[-2:]}/{annotation.annotation_id}.nc", 
                 encoding={"label": {"zlib": True, "complevel": 9}}
             )
-
 
 if __name__ == "__main__":
     with wk.webknossos_context(token=AUTH_TOKEN):
